@@ -1,0 +1,174 @@
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define CE_PIN 10
+#define CSN_PIN 9
+RF24 radio(CE_PIN, CSN_PIN);
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+const byte address[6] = "00001";
+
+// Estructura para los datos (debe coincidir con el emisor)
+struct SensorData {
+  float temperature;
+  float humidity;
+  uint32_t packetNumber;
+};
+
+// Icono de temperatura (8x8)
+static const unsigned char PROGMEM temp_icon[] = {
+  0b00111000,
+  0b00101000,
+  0b00101000,
+  0b00111000,
+  0b00111000,
+  0b01111100,
+  0b01111100,
+  0b00111000
+};
+
+// Icono de humedad (8x8)
+static const unsigned char PROGMEM hum_icon[] = {
+  0b00110000,
+  0b01001000,
+  0b10000100,
+  0b10000100,
+  0b01001000,
+  0b01001000,
+  0b00110000,
+  0b00000000
+};
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial); // Esperar a que se inicialice Serial
+  
+  // Configurar LED built-in
+  pinMode(LED_BUILTIN, OUTPUT);
+  
+  // Inicializar OLED
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("Fallo en OLED!"));
+    while(1);
+  }
+  
+  // Mostrar mensaje inicial
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  display.println("Iniciando sistema...");
+  display.display();
+  delay(2000);
+
+  // Inicializar radio
+  if (!radio.begin()) {
+    showError("Fallo en radio");
+    while(1);
+  }
+  
+  radio.openReadingPipe(0, address);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.setDataRate(RF24_250KBPS);
+  radio.setChannel(76);
+  radio.startListening();
+  
+  Serial.println("✅ Receptor listo");
+  Serial.println("📡 Esperando datos...");
+  
+  display.clearDisplay();
+  displayHeader();
+  display.setCursor(0, 20);
+  display.println("Esperando datos...");
+  display.display();
+}
+
+void loop() {
+  if (radio.available()) {
+    SensorData datos;
+    radio.read(&datos, sizeof(datos));
+    
+    // Indicar recepción con LED
+    digitalWrite(LED_BUILTIN, HIGH);
+    
+    Serial.print("📦 Paquete #");
+    Serial.print(datos.packetNumber);
+    Serial.print(" - Temp: ");
+    Serial.print(datos.temperature, 1);
+    Serial.print("°C, Hum: ");
+    Serial.print(datos.humidity, 0);
+    Serial.println("%");
+    
+    // Enviar datos a través del puerto serial en formato JSON
+    Serial.print("{\"temperatura\":");
+    Serial.print(datos.temperature, 1);
+    Serial.print(",\"humedad\":");
+    Serial.print(datos.humidity, 0);
+    Serial.println("}");
+    
+    // Mostrar en OLED
+    display.clearDisplay();
+    displayHeader();
+    
+    // Mostrar temperatura
+    display.drawBitmap(0, 20, temp_icon, 8, 8, WHITE);
+    display.setCursor(15, 20);
+    display.setTextSize(1);
+    display.print("Temp:");
+    display.setTextSize(2);
+    display.print(" ");
+    display.print(datos.temperature, 1);
+    display.print("C");
+    
+    // Mostrar humedad REAL
+    display.drawBitmap(0, 45, hum_icon, 8, 8, WHITE);
+    display.setCursor(15, 45);
+    display.setTextSize(1);
+    display.print("Hum:");
+    display.setTextSize(2);
+    display.print(" ");
+    display.print(datos.humidity, 0);
+    display.print("%");
+    
+    // Mostrar número de paquete
+    display.setCursor(80, 0);
+    display.setTextSize(1);
+    display.print("#");
+    display.print(datos.packetNumber);
+    
+    display.display();
+    
+    digitalWrite(LED_BUILTIN, LOW);
+    
+  } else {
+    // Serial.println("{\"status\":\"Esperando datos...\"}");
+    delay(100);
+  }
+}
+
+void displayHeader() {
+  display.setTextSize(1);
+  display.setCursor(0,0);
+  display.println("Estacion Meteorologica");
+  display.drawLine(0, 12, 127, 12, WHITE);
+}
+
+void showError(const char* msg) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0,0);
+  display.print("ERROR:");
+  display.setCursor(0,20);
+  display.setTextSize(2);
+  display.print(msg);
+  display.display();
+  Serial.print("Error: ");
+  Serial.println(msg);
+}

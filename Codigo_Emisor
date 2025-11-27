@@ -1,0 +1,91 @@
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+#include <DHT.h>
+
+// Configuración del módulo NRF24L01
+#define CE_PIN 10
+#define CSN_PIN 9
+RF24 radio(CE_PIN, CSN_PIN);
+
+// Configuración del sensor DHT11
+#define DHTPIN 2
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+const byte address[6] = "00001";
+
+// Estructura para los datos
+struct SensorData {
+  float temperature;
+  float humidity;
+  uint32_t packetNumber;
+};
+
+uint32_t packetCounter = 0;
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("==================================");
+  Serial.println("   TRANSMISOR DHT11 + NRF24L01   ");
+  Serial.println("==================================");
+  
+  // Inicializar el sensor DHT
+  dht.begin();
+  delay(2000);
+
+  // Inicializar el módulo de radio
+  if (!radio.begin()) {
+    Serial.println("❌ ERROR: Módulo NRF24L01 no responde");
+    while(1);
+  }
+  
+  radio.openWritingPipe(address);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.setDataRate(RF24_250KBPS);
+  radio.setRetries(3, 5);
+  radio.stopListening();
+  
+  Serial.println("✅ Transmisor listo");
+  Serial.println("🎯 Enviando datos...");
+}
+
+void loop() {
+  // Leer datos del sensor
+  float temp = dht.readTemperature();
+  float hum = dht.readHumidity();
+  
+  // Verificar si las lecturas son válidas
+  if (!isnan(temp) && !isnan(hum)) {
+    // Preparar datos para envío
+    SensorData datos;
+    datos.temperature = temp;
+    datos.humidity = hum;
+    datos.packetNumber = ++packetCounter;
+    
+    // Enviar datos por RF
+    bool enviado = radio.write(&datos, sizeof(datos));
+    
+    // Mostrar información por serial
+    Serial.print("📤 Paquete #");
+    Serial.print(packetCounter);
+    Serial.print(" - Temp: ");
+    Serial.print(temp, 1);
+    Serial.print("°C, Hum: ");
+    Serial.print(hum, 0);
+    Serial.print("% - ");
+    Serial.println(enviado ? "✅ Éxito" : "❌ Falló");
+    
+    // Enviar también por JSON para la interfaz web
+    Serial.print("{\"temperatura\":");
+    Serial.print(temp, 1);
+    Serial.print(",\"humedad\":");
+    Serial.print(hum, 0);
+    Serial.println("}");
+    
+  } else {
+    Serial.println("❌ ERROR: Lectura inválida del sensor DHT11");
+  }
+  
+  delay(2000); // Esperar 2 segundos entre lecturas
+}
